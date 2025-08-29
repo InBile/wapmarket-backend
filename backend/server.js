@@ -17,8 +17,12 @@ import { fileURLToPath } from 'url';
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const { Pool } = pg;
+
+if (!process.env.DATABASE_URL) {
+  console.error('❌ Falta DATABASE_URL en variables de entorno');
+  process.exit(1);
+}
 
 const PORT = Number(process.env.PORT || 8080);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -84,7 +88,7 @@ async function migrate(){
   CREATE INDEX IF NOT EXISTS idx_orders_business ON orders (business_id, status, created_at DESC);
   `;
   await pool.query(sql);
-  console.log('DB migrate: OK');
+  console.log('✅ DB migrate: OK');
 }
 
 const app = express();
@@ -185,10 +189,8 @@ app.post('/api/admin/businesses', requireAdmin, async (req, res)=>{
     if (!name) return res.status(400).json({ error: 'Nombre requerido' });
     if (!login_email || !password) return res.status(400).json({ error: 'Login y contraseña requeridos' });
 
-    // 🔑 Siempre forzamos a que sea "verified" o "unverified"
-    if (business_type !== 'verified') {
-      business_type = 'unverified';
-    }
+    // Normalizamos tipo
+    if (business_type !== 'verified') business_type = 'unverified';
 
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
@@ -208,11 +210,65 @@ app.post('/api/admin/businesses', requireAdmin, async (req, res)=>{
   }
 });
 
+app.get('/api/admin/businesses', requireAdmin, async (req, res)=>{
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, name, email, phone, location, business_type, login_email, created_at FROM businesses ORDER BY created_at DESC LIMIT 500'
+    );
+    res.json({ items: rows });
+  } catch (e) {
+    console.error('❌ Error listando negocios:', e);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+app.put('/api/admin/businesses/:id', requireAdmin, async (req, res)=>{
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
+
+    const fields = ['name','email','phone','location','business_type','login_email'];
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    for (const f of fields){
+      if (f in req.body){
+        if (f === 'business_type' && req.body[f] !== 'verified') {
+          // normalizamos
+          req.body[f] = 'unverified';
+        }
+        updates.push(`${f}=$${idx}`);
+        values.push(req.body[f]);
+        idx++;
+      }
+    }
+    if ('password' in req.body && req.body.password){
+      updates.push(`password_hash=$${idx}`);
+      values.push(await bcrypt.hash(req.body.password, 10));
+      idx++;
+    }
+    if (!updates.length) return res.status(400).json({ error: 'Nada para actualizar' });
+
+    values.push(id);
+    const sql = `UPDATE businesses SET ${updates.join(',')} WHERE id=$${idx} RETURNING id,name,login_email,business_type`;
+    const { rows } = await pool.query(sql, values);
+    if (!rows.length) return res.status(404).json({ error: 'No encontrado' });
+    res.json({ business: rows[0] });
+  } catch (e) {
+    console.error('❌ Error actualizando negocio:', e);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
 
 // ---- PUBLIC: list businesses & products ----
 app.get('/api/public/businesses', async (req, res)=>{
   try {
-    const { rows } = await pool.query(`SELECT id, name, location, phone, business_type FROM businesses ORDER BY (CASE business_type WHEN 'verified' THEN 2 ELSE 1 END) DESC, created_at DESC`);
+    const { rows } = await pool.query(
+      `SELECT id, name, location, phone, business_type
+       FROM businesses
+       ORDER BY (CASE business_type WHEN 'verified' THEN 2 ELSE 1 END) DESC, created_at DESC`
+    );
     res.json({ items: rows });
   } catch(e){ console.error(e); res.status(500).json({ error: 'Error del servidor' }); }
 });
@@ -278,12 +334,16 @@ app.post('/api/public/cart/checkout', async (req, res)=>{
     if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Carrito vacío' });
     if (!customer_phone) return res.status(400).json({ error: 'Falta teléfono' });
 
-    // Verify all items are from the same business
     const ids = items.map(i => Number(i.product_id)).filter(Boolean);
-    const { rows: products } = await pool.query(`SELECT id, business_id, price_xaf FROM products WHERE id = ANY($1::int[]) AND active=TRUE`, [ids]);
+    const { rows: products } = await pool.query(
+      `SELECT id, business_id, price_xaf FROM products WHERE id = ANY($1::int[]) AND active=TRUE`,
+      [ids]
+    );
     if (!products.length) return res.status(400).json({ error: 'Productos no válidos' });
     const bizId = products[0].business_id;
-    if (products.some(p => p.business_id !== bizId)) return res.status(400).json({ error: 'Solo puedes comprar productos de un negocio a la vez' });
+    if (products.some(p => p.business_id !== bizId)) {
+      return res.status(400).json({ error: 'Solo puedes comprar productos de un negocio a la vez' });
+    }
 
     const groupId = crypto.randomUUID();
     const fee = delivery ? DELIVERY_FEE_XAF : 0;
@@ -330,12 +390,26 @@ app.put('/api/business/orders/:id', requireBusiness, async (req, res)=>{
     const { status } = req.body;
     const allowed = ['new','accepted','rejected','fulfilled'];
     if (!allowed.includes(status)) return res.status(400).json({ error: 'Estado inválido' });
-    const { rows } = await pool.query(`UPDATE orders SET status=$1 WHERE id=$2 AND business_id=$3 RETURNING *`, [status, id, req.businessId]);
+    const { rows } = await pool.query(
+      `UPDATE orders SET status=$1 WHERE id=$2 AND business_id=$3 RETURNING *`,
+      [status, id, req.businessId]
+    );
     if (!rows.length) return res.status(404).json({ error: 'No encontrado' });
     res.json({ order: rows[0] });
   } catch(e){ console.error(e); res.status(500).json({ error: 'Error' }); }
 });
 
+// --- 404 JSON para /api ---
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Ruta no encontrada' });
+});
+
+// --- Manejador global de errores ---
+app.use((err, req, res, next) => {
+  console.error('❌ Unhandled error:', err);
+  res.status(500).json({ error: 'Error del servidor' });
+});
+
 migrate()
-  .then(()=> app.listen(PORT, ()=> console.log('wapmarket backend on :' + PORT)))
+  .then(()=> app.listen(PORT, ()=> console.log('🚀 wapmarket backend on :' + PORT)))
   .catch((e)=>{ console.error('Migration failed', e); process.exit(1); });
