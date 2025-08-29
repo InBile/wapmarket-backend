@@ -179,29 +179,31 @@ app.post('/api/business/login', async (req, res)=>{
 // ---- ADMIN: Businesses CRUD ----
 app.post('/api/admin/businesses', requireAdmin, async (req, res)=>{
   try {
-    console.log("📥 Datos recibidos para crear negocio:", req.body);
+    const { name, email, phone, location, login_email, password } = req.body;
+    let { business_type } = req.body;
 
-    const { name, email, phone, location, business_type, login_email, password } = req.body;
     if (!name) return res.status(400).json({ error: 'Nombre requerido' });
     if (!login_email || !password) return res.status(400).json({ error: 'Login y contraseña requeridos' });
 
+    // 🔑 Siempre forzamos a que sea "verified" o "unverified"
+    if (business_type !== 'verified') {
+      business_type = 'unverified';
+    }
+
     const hash = await bcrypt.hash(password, 10);
-    const type = business_type === 'verified' ? 'verified' : 'unverified';
-    
     const { rows } = await pool.query(
       `INSERT INTO businesses(name, email, phone, location, business_type, login_email, password_hash)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, name, email, phone, location, business_type, login_email, created_at`,
-      [name, email||null, phone||null, location||null, type, login_email, hash]
+      [name, email || null, phone || null, location || null, business_type, login_email, hash]
     );
-
     res.json({ business: rows[0] });
-  } catch(e){
-    console.error("❌ Error creando negocio:", e);
+  } catch (e) {
     if (String(e).includes('duplicate key')) {
       res.status(409).json({ error: 'Email o login_email ya existe' });
     } else {
-      res.status(500).json({ error: 'Error del servidor', detail: String(e) });
+      console.error('❌ Error creando negocio:', e);
+      res.status(500).json({ error: 'Error del servidor' });
     }
   }
 });
