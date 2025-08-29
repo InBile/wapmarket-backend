@@ -179,68 +179,33 @@ app.post('/api/business/login', async (req, res)=>{
 // ---- ADMIN: Businesses CRUD ----
 app.post('/api/admin/businesses', requireAdmin, async (req, res)=>{
   try {
+    console.log("📥 Datos recibidos para crear negocio:", req.body);
+
     const { name, email, phone, location, business_type, login_email, password } = req.body;
     if (!name) return res.status(400).json({ error: 'Nombre requerido' });
     if (!login_email || !password) return res.status(400).json({ error: 'Login y contraseña requeridos' });
+
     const hash = await bcrypt.hash(password, 10);
     const type = business_type === 'verified' ? 'verified' : 'unverified';
+    
     const { rows } = await pool.query(
       `INSERT INTO businesses(name, email, phone, location, business_type, login_email, password_hash)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING id, name, email, phone, location, business_type, login_email, created_at`,
       [name, email||null, phone||null, location||null, type, login_email, hash]
     );
+
     res.json({ business: rows[0] });
   } catch(e){
+    console.error("❌ Error creando negocio:", e);
     if (String(e).includes('duplicate key')) {
       res.status(409).json({ error: 'Email o login_email ya existe' });
     } else {
-      console.error(e);
-      res.status(500).json({ error: 'Error del servidor' });
+      res.status(500).json({ error: 'Error del servidor', detail: String(e) });
     }
   }
 });
 
-app.get('/api/admin/businesses', requireAdmin, async (req, res)=>{
-  try {
-    const { rows } = await pool.query('SELECT id, name, email, phone, location, business_type, login_email, created_at FROM businesses ORDER BY created_at DESC LIMIT 500');
-    res.json({ items: rows });
-  } catch(e){
-    console.error(e);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-});
-
-app.put('/api/admin/businesses/:id', requireAdmin, async (req, res)=>{
-  try {
-    const id = Number(req.params.id);
-    const fields = ['name','email','phone','location','business_type','login_email'];
-    const updates = [];
-    const values = [];
-    let idx = 1;
-    for (const f of fields){
-      if (f in req.body){
-        updates.push(f + '=$' + idx);
-        values.push(req.body[f]);
-        idx++;
-      }
-    }
-    if ('password' in req.body && req.body.password){
-      updates.push('password_hash=$' + idx);
-      values.push(await bcrypt.hash(req.body.password, 10));
-      idx++;
-    }
-    if (!updates.length) return res.status(400).json({ error: 'Nada para actualizar' });
-    values.push(id);
-    const sql = `UPDATE businesses SET ${updates.join(',')} WHERE id=$${idx} RETURNING id,name,login_email,business_type`;
-    const { rows } = await pool.query(sql, values);
-    if (!rows.length) return res.status(404).json({ error: 'No encontrado' });
-    res.json({ business: rows[0] });
-  } catch(e){
-    console.error(e);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-});
 
 // ---- PUBLIC: list businesses & products ----
 app.get('/api/public/businesses', async (req, res)=>{
