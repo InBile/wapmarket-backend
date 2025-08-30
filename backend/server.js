@@ -19,90 +19,11 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const { Pool } = pg;
-
-// Configuración de subida (multer en memoria)
-const upload = multer();
-
-// Router para subida de imágenes a ImgBB
-const router = express.Router();
-
-router.post("/upload", upload.single("image"), async (req, res) => {
-  try {
-    const apiKey = process.env.IMGBB_KEY; // Tu API key de ImgBB
-    const imageBuffer = req.file.buffer.toString("base64");
-
-    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-      method: "POST",
-      body: new URLSearchParams({ image: imageBuffer }),
-    });
-
-    const result = await response.json();
-    if (!result.success) {
-      return res.status(400).json({ error: "Error subiendo a ImgBB" });
-    }
-
-    // Devuelve la URL final que puedes guardar en products.image_url
-    res.json({ url: result.data.url });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Fallo en la subida" });
-  }
-});
 
 // ======================
 // Variables de entorno
 // ======================
-if (!process.env.DATABASE_URL) {
-  console.error('❌ Falta DATABASE_URL en variables de entorno');
-  process.exit(1);
-}
-
-const PORT = Number(process.env.PORT || 8080);
-const DATABASE_URL = process.env.DATABASE_URL;
-const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@wapmarket.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
-const DELIVERY_FEE_XAF = Number(process.env.DELIVERY_FEE_XAF || 2000);
-
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: process.env.PGSSLMODE
-    ? { rejectUnauthorized: false }
-    : (process.env.NODE_ENV === 'production'
-      ? { rejectUnauthorized: false }
-      : false),
-});
-
-// === Aquí ya montas tu app principal ===
-const app = express();
-
-// Middlewares
-app.use(cors());
-app.use(helmet());
-app.use(compression());
-app.use(express.json());
-app.use(morgan('dev'));
-
-// Conectar el router de subida
-app.use("/api", router);
-
-// Ejemplo: levantar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
-});
-
-export default router;
-
-
-dotenv.config();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const { Pool } = pg;
-
 if (!process.env.DATABASE_URL) {
   console.error('❌ Falta DATABASE_URL en variables de entorno');
   process.exit(1);
@@ -122,6 +43,9 @@ const pool = new Pool({
   ssl: process.env.PGSSLMODE ? { rejectUnauthorized: false } : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
 });
 
+// ======================
+// Migraciones
+// ======================
 async function migrate(){
   const sql = `
   CREATE TABLE IF NOT EXISTS businesses (
@@ -175,6 +99,9 @@ async function migrate(){
   console.log('✅ DB migrate: OK');
 }
 
+// ======================
+// App principal
+// ======================
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors({
@@ -191,7 +118,9 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 180 });
 app.use('/api/public', limiter);
 
-// Static uploads
+// ======================
+// Static uploads (carpeta local)
+// ======================
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 app.use('/uploads', express.static(uploadDir));
@@ -210,6 +139,34 @@ function absoluteUrl(req, filename){
   const base = PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
   return `${base}/uploads/${filename}`;
 }
+
+// ======================
+// Subida a ImgBB (memoria) — sin colisionar con `upload`
+// ======================
+const imgbbUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 6 * 1024 * 1024 } });
+app.post("/api/upload", imgbbUpload.single("image"), async (req, res) => {
+  try {
+    const apiKey = process.env.IMGBB_KEY;
+    const imageBuffer = req.file?.buffer?.toString("base64");
+    if (!apiKey) return res.status(500).json({ error: "Falta IMGBB_KEY" });
+    if (!imageBuffer) return res.status(400).json({ error: "Falta imagen" });
+
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+      method: "POST",
+      body: new URLSearchParams({ image: imageBuffer }),
+    });
+
+    const result = await response.json();
+    if (!result.success) return res.status(400).json({ error: "Error subiendo a ImgBB" });
+
+    res.json({ url: result.data.url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Fallo en la subida" });
+  }
+});
+
+app.get('/health', (req, res)=> res.json({ ok: true, delivery_fee_xaf: DELIVERY_FEE_XAF }));
 
 // ---- AUTH HELPERS ----
 function signToken(payload){
@@ -235,8 +192,6 @@ function requireBusiness(req, res, next){
     next();
   } catch(e){ return res.status(401).json({ error: 'No autorizado' }); }
 }
-
-app.get('/health', (req, res)=> res.json({ ok: true, delivery_fee_xaf: DELIVERY_FEE_XAF }));
 
 // ---- ADMIN AUTH ----
 app.post('/api/admin/login', (req, res)=>{
@@ -273,7 +228,6 @@ app.post('/api/admin/businesses', requireAdmin, async (req, res)=>{
     if (!name) return res.status(400).json({ error: 'Nombre requerido' });
     if (!login_email || !password) return res.status(400).json({ error: 'Login y contraseña requeridos' });
 
-    // Normalizamos tipo
     if (business_type !== 'verified') business_type = 'unverified';
 
     const hash = await bcrypt.hash(password, 10);
@@ -319,7 +273,6 @@ app.put('/api/admin/businesses/:id', requireAdmin, async (req, res)=>{
     for (const f of fields){
       if (f in req.body){
         if (f === 'business_type' && req.body[f] !== 'verified') {
-          // normalizamos
           req.body[f] = 'unverified';
         }
         updates.push(`${f}=$${idx}`);
@@ -494,6 +447,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Error del servidor' });
 });
 
+// ======================
+// Iniciar servidor
+// ======================
 migrate()
   .then(()=> app.listen(PORT, ()=> console.log('🚀 wapmarket backend on :' + PORT)))
   .catch((e)=>{ console.error('Migration failed', e); process.exit(1); });
