@@ -446,24 +446,32 @@ app.get('/api/public/products', async (req, res) => {
 // ======================
 app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
-    const url = absoluteUrl(req, req.file.filename);
-    res.json({ url });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'Error subiendo imagen' }); }
-});
+    if (!req.file?.path) return res.status(400).json({ error: 'Falta imagen' });
 
-app.post('/api/products', requireBusiness, async (req, res) => {
-  try {
-    const { title, description, category, price_xaf, image_url, active } = req.body;
-    if (!title) return res.status(400).json({ error: 'Título requerido' });
-    const { rows } = await pool.query(
-      `INSERT INTO products(business_id, title, description, category, price_xaf, image_url, active)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, TRUE))
-       RETURNING *`,
-      [req.businessId, title, description || null, category || null, price_xaf || null, image_url || null, active]
+    // Convertir a base64
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const base64Image = fileBuffer.toString('base64');
+
+    const formData = new FormData();
+    formData.append('image', base64Image);
+
+    const response = await fetch(
+      `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
+      { method: 'POST', body: formData }
     );
-    res.json({ product: rows[0] });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'Error del servidor' }); }
+
+    const data = await response.json();
+
+    if (data?.success) {
+      return res.json({ url: data.data?.url });
+    } else {
+      console.error('ImgBB error:', data);
+      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
+    }
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error subiendo imagen' });
+  }
 });
 
 
