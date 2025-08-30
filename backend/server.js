@@ -21,6 +21,38 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const { Pool } = pg;
 
+import fetch from "node-fetch";
+import FormData from "form-data";
+
+app.post("/api/upload", upload.single("image"), async (req, res) => {
+  try {
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const base64Image = fileBuffer.toString("base64");
+
+    const formData = new FormData();
+    formData.append("image", base64Image);
+
+    const response = await fetch(
+      `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
+      { method: "POST", body: formData }
+    );
+
+    const data = await response.json();
+
+    if (data.success) {
+      return res.json({ url: data.data.url });
+    } else {
+      console.error(data);
+      return res.status(500).json({ error: "Error subiendo a ImgBB" });
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
+
+
 // ======================
 // Variables de entorno
 // ======================
