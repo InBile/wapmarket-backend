@@ -15,13 +15,43 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fetch from "node-fetch";
 
-const upload = multer();
-const router = express.Router();
+dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const { Pool } = pg;
 
-// Subida a ImgBB
-router.post("/upload", upload.single("image"), async (req, res) => {
+if (!process.env.DATABASE_URL) {
+  console.error('❌ Falta DATABASE_URL en variables de entorno');
+  process.exit(1);
+}
+
+const PORT = Number(process.env.PORT || 8080);
+const DATABASE_URL = process.env.DATABASE_URL;
+const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@wapmarket.com';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s=>s.trim()).filter(Boolean);
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
+const DELIVERY_FEE_XAF = Number(process.env.DELIVERY_FEE_XAF || 2000);
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: process.env.PGSSLMODE 
+    ? { rejectUnauthorized: false } 
+    : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
+});
+
+// 👉 Configuración de multer
+const upload = multer();
+
+// 👉 Ruta para subir imágenes a ImgBB
+// Se usa en productos o negocios para guardar la URL
+const app = express();
+app.post("/api/upload", upload.single("image"), async (req, res) => {
   try {
-    const apiKey = process.env.IMGBB_KEY; // guarda tu API key en Railway
+    const apiKey = process.env.IMGBB_KEY; // agrega tu API key en Railway
+    if (!apiKey) return res.status(500).json({ error: "Falta IMGBB_KEY en variables de entorno" });
+
     const imageBuffer = req.file.buffer.toString("base64");
 
     const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
@@ -32,10 +62,10 @@ router.post("/upload", upload.single("image"), async (req, res) => {
     const result = await response.json();
     if (!result.success) return res.status(400).json({ error: "Error subiendo a ImgBB" });
 
-    // Devuelve la URL que podrás guardar en tu tabla products.image_url
+    // Devuelve la URL que puedes guardar en products.image_url o businesses.logo_url
     res.json({ url: result.data.url });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Error en subida ImgBB:", err);
     res.status(500).json({ error: "Fallo en la subida" });
   }
 });
