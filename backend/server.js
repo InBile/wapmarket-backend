@@ -22,10 +22,10 @@ const __dirname = path.dirname(__filename);
 
 const { Pool } = pg;
 
-// ======================
 // Configuración de subida (multer en memoria)
-// ======================
 const upload = multer();
+
+// Router para subida de imágenes a ImgBB
 const router = express.Router();
 
 router.post("/upload", upload.single("image"), async (req, res) => {
@@ -77,9 +77,7 @@ const pool = new Pool({
       : false),
 });
 
-// ======================
-// App principal
-// ======================
+// === Aquí ya montas tu app principal ===
 const app = express();
 
 // Middlewares
@@ -92,7 +90,7 @@ app.use(morgan('dev'));
 // Conectar el router de subida
 app.use("/api", router);
 
-// 🚀 Servidor en Railway
+// Ejemplo: levantar servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
 });
