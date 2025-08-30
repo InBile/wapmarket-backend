@@ -169,30 +169,31 @@ function absoluteUrl(req, filename) {
 // ======================
 // Subida a ImgBB (backend)
 // ======================
-app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
+// 🚀 Subir imagen a ImgBB
+async function uploadToImgBB(localFilePath) {
+  const form = new FormData();
+  // 👇 leemos el archivo como base64
+  const imageBuffer = fs.readFileSync(localFilePath);
+  form.append("image", imageBuffer.toString("base64"));
 
-    const base64Image = req.file.buffer.toString('base64'); // ✅ usar buffer
-    const formData = new FormData();
-    formData.append('image', base64Image);
+  const res = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
+    method: "POST",
+    body: form,
+    headers: form.getHeaders(),
+  });
 
-    const response = await fetch(
-      `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
-      { method: 'POST', body: formData }
-    );
+  const json = await res.json();
 
-    const data = await response.json();
-    if (data?.success) return res.json({ url: data.data?.url });
+  // borramos el archivo temporal
+  try { fs.unlinkSync(localFilePath); } catch {}
 
-    console.error('ImgBB error:', data);
-    return res.status(500).json({ error: 'Error subiendo a ImgBB' });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: 'Error interno' });
+  if (!json?.success) {
+    console.error("ImgBB error:", json);
+    throw new Error("Error subiendo a ImgBB");
   }
-});
 
+  return json.data.display_url || json.data.url;
+}
 // ======================
 // Subida a ImgBB (helper para front)
 // ======================
