@@ -143,30 +143,51 @@ function absoluteUrl(req, filename){
 // ======================
 // Subida a ImgBB (memoria) — sin colisionar con `upload`
 // ======================
-const imgbbUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 6 * 1024 * 1024 } });
-app.post("/api/upload", imgbbUpload.single("image"), async (req, res) => {
+// Sube una imagen al backend (/api/upload) que a su vez la envía a ImgBB.
+// Devuelve la URL (string) o lanza Error con mensaje legible.
+export async function uploadImageToApi(
+  file,
+  { endpoint = "/api/upload", token, apiBase = (typeof process !== "undefined" ? (process.env?.NEXT_PUBLIC_API_BASE_URL || "") : "") } = {}
+) {
+  if (!file) throw new Error("Selecciona un archivo");
+  if (!file.type?.startsWith("image/")) throw new Error("El archivo debe ser una imagen");
+  if (file.size > 6 * 1024 * 1024) throw new Error("La imagen no puede superar 6MB");
+
+  const formData = new FormData();
+  formData.append("image", file);
+
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`; // por si usas ruta protegida
+
+  let res;
   try {
-    const apiKey = process.env.IMGBB_KEY;
-    const imageBuffer = req.file?.buffer?.toString("base64");
-    if (!apiKey) return res.status(500).json({ error: "Falta IMGBB_KEY" });
-    if (!imageBuffer) return res.status(400).json({ error: "Falta imagen" });
-
-    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+    res = await fetch(`${apiBase}${endpoint}`, {
       method: "POST",
-      body: new URLSearchParams({ image: imageBuffer }),
+      headers, // NO pongas Content-Type manualmente con FormData
+      body: formData,
     });
-
-    const result = await response.json();
-    if (!result.success) return res.status(400).json({ error: "Error subiendo a ImgBB" });
-
-    res.json({ url: result.data.url });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Fallo en la subida" });
+  } catch (e) {
+    throw new Error("No se pudo conectar con el servidor. Revisa tu red o la URL del API.");
   }
-});
 
-app.get('/health', (req, res)=> res.json({ ok: true, delivery_fee_xaf: DELIVERY_FEE_XAF }));
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`Respuesta inválida del servidor (HTTP ${res.status}).`);
+  }
+
+  if (!res.ok || data?.error) {
+    throw new Error(data?.error || `Error subiendo imagen (HTTP ${res.status}).`);
+  }
+
+  if (!data?.url) {
+    throw new Error("El servidor no devolvió la URL de la imagen.");
+  }
+
+  return data.url;
+}
+
 
 // ---- AUTH HELPERS ----
 function signToken(payload){
