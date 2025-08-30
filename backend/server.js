@@ -171,11 +171,10 @@ function absoluteUrl(req, filename) {
 // ======================
 app.post('/api/upload', upload.single('image'), async (req, res) => {
   try {
-    if (!req.file?.path) return res.status(400).json({ error: 'Falta imagen' });
+    if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
 
-    // ImgBB acepta base64 o binario. Aquí usamos base64 dentro de multipart.
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const base64Image = fileBuffer.toString('base64');
+    // Convertir a base64 directamente desde buffer
+    const base64Image = req.file.buffer.toString('base64');
 
     const formData = new FormData();
     formData.append('image', base64Image);
@@ -439,11 +438,9 @@ app.get('/api/public/products', async (req, res) => {
 // ======================
 app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
   try {
-    if (!req.file?.path) return res.status(400).json({ error: 'Falta imagen' });
+    if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
 
-    // Convertir a base64
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const base64Image = fileBuffer.toString('base64');
+    const base64Image = req.file.buffer.toString('base64');
 
     const formData = new FormData();
     formData.append('image', base64Image);
