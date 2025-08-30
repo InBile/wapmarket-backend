@@ -171,10 +171,12 @@ function absoluteUrl(req, filename) {
 // ======================
 // 🚀 Subir imagen a ImgBB
 async function uploadToImgBB(localFilePath) {
-  const form = new FormData();
-  // 👇 leemos el archivo como base64
+  // leer archivo como base64 (lo que ImgBB necesita)
   const imageBuffer = fs.readFileSync(localFilePath);
-  form.append("image", imageBuffer.toString("base64"));
+  const base64Image = imageBuffer.toString("base64");
+
+  const form = new FormData();
+  form.append("image", base64Image);
 
   const res = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
     method: "POST",
@@ -184,15 +186,15 @@ async function uploadToImgBB(localFilePath) {
 
   const json = await res.json();
 
-  // borramos el archivo temporal
+  // borrar archivo temporal
   try { fs.unlinkSync(localFilePath); } catch {}
 
-  if (!json?.success) {
-    console.error("ImgBB error:", json);
-    throw new Error("Error subiendo a ImgBB");
+  if (!json.success) {
+    console.error("❌ ImgBB error:", json);
+    throw new Error(json.error?.message || "Error subiendo a ImgBB");
   }
 
-  return json.data.display_url || json.data.url;
+  return json.data.display_url;
 }
 // ======================
 // Subida a ImgBB (helper para front)
