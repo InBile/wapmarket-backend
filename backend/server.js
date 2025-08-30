@@ -161,55 +161,46 @@ app.use('/api/public', limiter);
 
 
 // ======================
-// Static uploads (carpeta local)
-// ======================
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-app.use('/uploads', express.static(uploadDir));
-
-const storage = multer.memoryStorage();
-const upload = multer({ storage, limits: { fileSize: 6 * 1024 * 1024 } });
-
-function absoluteUrl(req, filename) {
-  const base = PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
-  return `${base}/uploads/${filename}`;
-}
-
-
-// ======================
 // Subida a ImgBB (backend)
 // ======================
-// ✅ SUBIDA PÚBLICA A IMGBB (usa buffer, no path)
-app.post('/api/upload', upload.single('image'), async (req, res) => {
+// 📌 Subida de imágenes a ImgBB
+app.post("/api/business/upload-image", upload.single("image"), async (req, res) => {
   try {
+    console.log("=== [UPLOAD IMAGE DEBUG] ===");
+    console.log("KEY?", process.env.IMGBB_API_KEY ? "OK" : "MISSING");
+    console.log("FILE?", req.file ? req.file.originalname : "NO FILE");
+
     if (!process.env.IMGBB_API_KEY) {
-      return res.status(500).json({ error: 'Falta IMGBB_API_KEY en el servidor' });
+      return res.status(500).json({ error: "Falta IMGBB_API_KEY en el servidor" });
     }
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ error: 'Falta imagen' });
+    if (!req.file) {
+      return res.status(400).json({ error: "No se recibió archivo" });
     }
 
-    const base64Image = req.file.buffer.toString('base64');
-    const formData = new FormData();
-    formData.append('image', base64Image);
+    // Convertir a base64
+    const base64 = req.file.buffer.toString("base64");
 
-    const resp = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
-      method: 'POST',
-      body: formData
+    // Llamada a ImgBB
+    const formData = new URLSearchParams();
+    formData.append("key", process.env.IMGBB_API_KEY);
+    formData.append("image", base64);
+
+    const resp = await fetch("https://api.imgbb.com/1/upload", {
+      method: "POST",
+      body: formData,
     });
 
-    const data = await resp.json().catch(() => null);
+    const data = await resp.json();
+    console.log("ImgBB response:", data);
 
-    if (!resp.ok || !data) {
-      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
+    if (!data.success) {
+      return res.status(500).json({ error: "ImgBB error", details: data });
     }
-    if (data.success && data.data?.url) {
-      return res.json({ url: data.data.url });
-    }
-    return res.status(500).json({ error: data?.error?.message || 'Error subiendo a ImgBB' });
+
+    res.json({ url: data.data.url });
   } catch (err) {
-    console.error('ImgBB upload error:', err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
+    console.error("Upload error:", err);
+    res.status(500).json({ error: "Error subiendo a ImgBB", details: err.message });
   }
 });
 
