@@ -138,6 +138,18 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'), false);
   }
 }));
+// ✅ CORS fix
+app.use(cors({
+  origin: [
+    "https://wapmarket-frontend.vercel.app", // tu frontend en Vercel
+    "http://localhost:3000" // opcional para pruebas locales
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+// También manejar preflight
+app.options("*", cors());
 
 // ===== Seguridad / Perf / Logs =====
 app.use(helmet());
