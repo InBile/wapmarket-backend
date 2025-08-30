@@ -21,7 +21,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const { Pool } = pg;
 
-import fetch from "node-fetch";
 import FormData from "form-data";
 
 app.post("/api/upload", upload.single("image"), async (req, res) => {
