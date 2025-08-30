@@ -1,3 +1,9 @@
+// =======================================================
+// server.js — WapMarket backend (Node 18.20.5, ESM)
+// Ordenado y listo para copiar/pegar
+// =======================================================
+
+// ===== Imports =====
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -13,43 +19,22 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import FormData from 'form-data'; // Para subida a ImgBB desde el backend
+
+// Node 18.20.5 trae fetch global (no hace falta node-fetch)
 
 
+// ===== Cargar variables de entorno =====
 dotenv.config();
 
+
+// ===== Utilidades de ruta (ESM) =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+
+// ===== PostgreSQL (pg) =====
 const { Pool } = pg;
-
-import FormData from "form-data";
-
-app.post("/api/upload", upload.single("image"), async (req, res) => {
-  try {
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const base64Image = fileBuffer.toString("base64");
-
-    const formData = new FormData();
-    formData.append("image", base64Image);
-
-    const response = await fetch(
-      `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
-      { method: "POST", body: formData }
-    );
-
-    const data = await response.json();
-
-    if (data.success) {
-      return res.json({ url: data.data.url });
-    } else {
-      console.error(data);
-      return res.status(500).json({ error: "Error subiendo a ImgBB" });
-    }
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Error interno del servidor" });
-  }
-});
-
 
 
 // ======================
@@ -65,19 +50,27 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@wapmarket.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s=>s.trim()).filter(Boolean);
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 const DELIVERY_FEE_XAF = Number(process.env.DELIVERY_FEE_XAF || 2000);
 
+
+// ===== Pool de conexión =====
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: process.env.PGSSLMODE ? { rejectUnauthorized: false } : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
+  ssl: process.env.PGSSLMODE
+    ? { rejectUnauthorized: false }
+    : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
 });
+
 
 // ======================
 // Migraciones
 // ======================
-async function migrate(){
+async function migrate() {
   const sql = `
   CREATE TABLE IF NOT EXISTS businesses (
     id SERIAL PRIMARY KEY,
@@ -130,24 +123,32 @@ async function migrate(){
   console.log('✅ DB migrate: OK');
 }
 
+
 // ======================
 // App principal
 // ======================
 const app = express();
 app.set('trust proxy', 1);
+
+// ===== CORS =====
 app.use(cors({
-  origin: function(origin, cb){
+  origin: function (origin, cb) {
     if (!origin) return cb(null, true);
     if (CORS_ORIGINS.length === 0 || CORS_ORIGINS.includes(origin)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'), false);
   }
 }));
+
+// ===== Seguridad / Perf / Logs =====
 app.use(helmet());
 app.use(compression());
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// ===== Rate limit público =====
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 180 });
 app.use('/api/public', limiter);
+
 
 // ======================
 // Static uploads (carpeta local)
@@ -157,8 +158,8 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 app.use('/uploads', express.static(uploadDir));
 
 const storage = multer.diskStorage({
-  destination: (req,file,cb)=> cb(null, uploadDir),
-  filename: (req,file,cb)=>{
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
     const ext = path.extname(file.originalname || '').toLowerCase();
     const name = crypto.randomBytes(10).toString('hex') + ext;
     cb(null, name);
@@ -166,26 +167,60 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 6 * 1024 * 1024 } });
 
-function absoluteUrl(req, filename){
+function absoluteUrl(req, filename) {
   const base = PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
   return `${base}/uploads/${filename}`;
 }
 
+
 // ======================
-// Subida a ImgBB (memoria) — sin colisionar con `upload`
+// Subida a ImgBB (backend)
 // ======================
-// Sube una imagen al backend (/api/upload) que a su vez la envía a ImgBB.
-// Devuelve la URL (string) o lanza Error con mensaje legible.
+app.post('/api/upload', upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file?.path) return res.status(400).json({ error: 'Falta imagen' });
+
+    // ImgBB acepta base64 o binario. Aquí usamos base64 dentro de multipart.
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const base64Image = fileBuffer.toString('base64');
+
+    const formData = new FormData();
+    formData.append('image', base64Image);
+
+    const response = await fetch(
+      `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
+      { method: 'POST', body: formData }
+    );
+
+    const data = await response.json();
+
+    if (data?.success) {
+      return res.json({ url: data.data?.url });
+    } else {
+      console.error('ImgBB error:', data);
+      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+
+// ======================
+// Subida a ImgBB (helper para front)
+// ======================
+// Nota: este helper exportado usa fetch + FormData (no toques esto si lo usas desde el front)
 export async function uploadImageToApi(
   file,
-  { endpoint = "/api/upload", token, apiBase = (typeof process !== "undefined" ? (process.env?.NEXT_PUBLIC_API_BASE_URL || "") : "") } = {}
+  { endpoint = '/api/upload', token, apiBase = (typeof process !== 'undefined' ? (process.env?.NEXT_PUBLIC_API_BASE_URL || '') : '') } = {}
 ) {
-  if (!file) throw new Error("Selecciona un archivo");
-  if (!file.type?.startsWith("image/")) throw new Error("El archivo debe ser una imagen");
-  if (file.size > 6 * 1024 * 1024) throw new Error("La imagen no puede superar 6MB");
+  if (!file) throw new Error('Selecciona un archivo');
+  if (!file.type?.startsWith('image/')) throw new Error('El archivo debe ser una imagen');
+  if (file.size > 6 * 1024 * 1024) throw new Error('La imagen no puede superar 6MB');
 
   const formData = new FormData();
-  formData.append("image", file);
+  formData.append('image', file);
 
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`; // por si usas ruta protegida
@@ -193,12 +228,12 @@ export async function uploadImageToApi(
   let res;
   try {
     res = await fetch(`${apiBase}${endpoint}`, {
-      method: "POST",
+      method: 'POST',
       headers, // NO pongas Content-Type manualmente con FormData
       body: formData,
     });
   } catch (e) {
-    throw new Error("No se pudo conectar con el servidor. Revisa tu red o la URL del API.");
+    throw new Error('No se pudo conectar con el servidor. Revisa tu red o la URL del API.');
   }
 
   let data;
@@ -213,18 +248,21 @@ export async function uploadImageToApi(
   }
 
   if (!data?.url) {
-    throw new Error("El servidor no devolvió la URL de la imagen.");
+    throw new Error('El servidor no devolvió la URL de la imagen.');
   }
 
   return data.url;
 }
 
 
-// ---- AUTH HELPERS ----
-function signToken(payload){
+// ======================
+// AUTH HELPERS (JWT)
+// ======================
+function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 }
-function requireAdmin(req, res, next){
+
+function requireAdmin(req, res, next) {
   try {
     const hdr = req.headers.authorization || '';
     const token = hdr.startsWith('Bearer ') ? hdr.slice(7) : '';
@@ -232,9 +270,10 @@ function requireAdmin(req, res, next){
     if (!data || data.role !== 'admin') return res.status(401).json({ error: 'No autorizado' });
     req.admin = { email: data.email };
     next();
-  } catch(e){ return res.status(401).json({ error: 'No autorizado' }); }
+  } catch (e) { return res.status(401).json({ error: 'No autorizado' }); }
 }
-function requireBusiness(req, res, next){
+
+function requireBusiness(req, res, next) {
   try {
     const hdr = req.headers.authorization || '';
     const token = hdr.startsWith('Bearer ') ? hdr.slice(7) : '';
@@ -242,20 +281,22 @@ function requireBusiness(req, res, next){
     if (!data || data.role !== 'business') return res.status(401).json({ error: 'No autorizado' });
     req.businessId = Number(data.business_id);
     next();
-  } catch(e){ return res.status(401).json({ error: 'No autorizado' }); }
+  } catch (e) { return res.status(401).json({ error: 'No autorizado' }); }
 }
 
-// ---- ADMIN AUTH ----
-app.post('/api/admin/login', (req, res)=>{
+
+// ======================
+// Rutas: AUTH
+// ======================
+app.post('/api/admin/login', (req, res) => {
   const { email, password } = req.body || {};
-  if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD){
-    return res.json({ token: signToken({ role:'admin', email }) });
+  if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+    return res.json({ token: signToken({ role: 'admin', email }) });
   }
   res.status(401).json({ error: 'Credenciales inválidas' });
 });
 
-// ---- BUSINESS AUTH ----
-app.post('/api/business/login', async (req, res)=>{
+app.post('/api/business/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'Faltan credenciales' });
@@ -263,16 +304,19 @@ app.post('/api/business/login', async (req, res)=>{
     if (!rows.length || !rows[0].password_hash) return res.status(401).json({ error: 'Credenciales inválidas' });
     const ok = await bcrypt.compare(password, rows[0].password_hash);
     if (!ok) return res.status(401).json({ error: 'Credenciales inválidas' });
-    const token = signToken({ role:'business', business_id: rows[0].id, email });
+    const token = signToken({ role: 'business', business_id: rows[0].id, email });
     res.json({ token, business_id: rows[0].id });
-  } catch(e){
+  } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
-// ---- ADMIN: Businesses CRUD ----
-app.post('/api/admin/businesses', requireAdmin, async (req, res)=>{
+
+// ======================
+// Rutas: ADMIN Businesses CRUD
+// ======================
+app.post('/api/admin/businesses', requireAdmin, async (req, res) => {
   try {
     const { name, email, phone, location, login_email, password } = req.body;
     let { business_type } = req.body;
@@ -300,7 +344,7 @@ app.post('/api/admin/businesses', requireAdmin, async (req, res)=>{
   }
 });
 
-app.get('/api/admin/businesses', requireAdmin, async (req, res)=>{
+app.get('/api/admin/businesses', requireAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT id, name, email, phone, location, business_type, login_email, created_at FROM businesses ORDER BY created_at DESC LIMIT 500'
@@ -312,18 +356,18 @@ app.get('/api/admin/businesses', requireAdmin, async (req, res)=>{
   }
 });
 
-app.put('/api/admin/businesses/:id', requireAdmin, async (req, res)=>{
+app.put('/api/admin/businesses/:id', requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
 
-    const fields = ['name','email','phone','location','business_type','login_email'];
+    const fields = ['name', 'email', 'phone', 'location', 'business_type', 'login_email'];
     const updates = [];
     const values = [];
     let idx = 1;
 
-    for (const f of fields){
-      if (f in req.body){
+    for (const f of fields) {
+      if (f in req.body) {
         if (f === 'business_type' && req.body[f] !== 'verified') {
           req.body[f] = 'unverified';
         }
@@ -332,7 +376,7 @@ app.put('/api/admin/businesses/:id', requireAdmin, async (req, res)=>{
         idx++;
       }
     }
-    if ('password' in req.body && req.body.password){
+    if ('password' in req.body && req.body.password) {
       updates.push(`password_hash=$${idx}`);
       values.push(await bcrypt.hash(req.body.password, 10));
       idx++;
@@ -350,8 +394,11 @@ app.put('/api/admin/businesses/:id', requireAdmin, async (req, res)=>{
   }
 });
 
-// ---- PUBLIC: list businesses & products ----
-app.get('/api/public/businesses', async (req, res)=>{
+
+// ======================
+// Rutas: PUBLIC (listados)
+// ======================
+app.get('/api/public/businesses', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, name, location, phone, business_type
@@ -359,10 +406,10 @@ app.get('/api/public/businesses', async (req, res)=>{
        ORDER BY (CASE business_type WHEN 'verified' THEN 2 ELSE 1 END) DESC, created_at DESC`
     );
     res.json({ items: rows });
-  } catch(e){ console.error(e); res.status(500).json({ error: 'Error del servidor' }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
-app.get('/api/public/products', async (req, res)=>{
+app.get('/api/public/products', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     const category = String(req.query.category || '').trim();
@@ -372,7 +419,7 @@ app.get('/api/public/products', async (req, res)=>{
 
     const params = [];
     let where = 'p.active = TRUE';
-    if (business_id){ params.push(business_id); where += ` AND p.business_id = $${params.length}`; }
+    if (business_id) { params.push(business_id); where += ` AND p.business_id = $${params.length}`; }
     if (q) { params.push(q); where += ` AND to_tsvector('spanish', coalesce(p.title,'') || ' ' || coalesce(p.description,'')) @@ plainto_tsquery('spanish', $${params.length})`; }
     if (category) { params.push(category); where += ` AND p.category = $${params.length}`; }
 
@@ -383,26 +430,29 @@ app.get('/api/public/products', async (req, res)=>{
       JOIN businesses b ON b.id = p.business_id
       WHERE ${where}
       ORDER BY p.created_at DESC
-      LIMIT $${params.length-1} OFFSET $${params.length}
+      LIMIT $${params.length - 1} OFFSET $${params.length}
     `;
     const { rows } = await pool.query(sql, params);
     res.json({ items: rows, limit, offset });
-  } catch(e){
+  } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
-// ---- BUSINESS: uploads & products ----
-app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res)=>{
+
+// ======================
+// Rutas: BUSINESS (uploads & products)
+// ======================
+app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
     const url = absoluteUrl(req, req.file.filename);
     res.json({ url });
-  } catch(e){ console.error(e); res.status(500).json({ error: 'Error subiendo imagen' }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Error subiendo imagen' }); }
 });
 
-app.post('/api/products', requireBusiness, async (req, res)=>{
+app.post('/api/products', requireBusiness, async (req, res) => {
   try {
     const { title, description, category, price_xaf, image_url, active } = req.body;
     if (!title) return res.status(400).json({ error: 'Título requerido' });
@@ -410,14 +460,17 @@ app.post('/api/products', requireBusiness, async (req, res)=>{
       `INSERT INTO products(business_id, title, description, category, price_xaf, image_url, active)
        VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, TRUE))
        RETURNING *`,
-      [req.businessId, title, description||null, category||null, price_xaf||null, image_url||null, active]
+      [req.businessId, title, description || null, category || null, price_xaf || null, image_url || null, active]
     );
     res.json({ product: rows[0] });
-  } catch(e){ console.error(e); res.status(500).json({ error: 'Error del servidor' }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
-// ---- PUBLIC: orders + cart (single business) ----
-app.post('/api/public/cart/checkout', async (req, res)=>{
+
+// ======================
+// Rutas: PUBLIC (checkout / orders)
+// ======================
+app.post('/api/public/cart/checkout', async (req, res) => {
   try {
     const { items, customer_name, customer_phone, address, note, delivery } = req.body || {};
     if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Carrito vacío' });
@@ -438,31 +491,34 @@ app.post('/api/public/cart/checkout', async (req, res)=>{
     const fee = delivery ? DELIVERY_FEE_XAF : 0;
     const created = [];
 
-    for (const it of items){
+    for (const it of items) {
       const p = products.find(x => x.id === Number(it.product_id));
       if (!p) continue;
       const qty = Math.max(1, Number(it.qty || 1));
       const { rows } = await pool.query(
         `INSERT INTO orders(group_id, product_id, business_id, qty, customer_name, customer_phone, address, note, delivery, delivery_fee_xaf, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'new') RETURNING *`,
-        [groupId, p.id, bizId, qty, customer_name||null, customer_phone, address||null, note||null, !!delivery, fee]
+        [groupId, p.id, bizId, qty, customer_name || null, customer_phone, address || null, note || null, !!delivery, fee]
       );
       created.push(rows[0]);
     }
     if (!created.length) return res.status(400).json({ error: 'No se pudo crear el pedido' });
 
     let subTotal = 0;
-    for (const o of created){
-      const prod = products.find(pp=>pp.id===o.product_id);
-      subTotal += Number(prod?.price_xaf||0) * Number(o.qty||1);
+    for (const o of created) {
+      const prod = products.find(pp => pp.id === o.product_id);
+      subTotal += Number(prod?.price_xaf || 0) * Number(o.qty || 1);
     }
     const total = subTotal + fee;
     res.json({ group_id: groupId, orders: created, subtotal_xaf: subTotal, delivery_fee_xaf: fee, total_xaf: total, business_id: bizId });
-  } catch(e){ console.error(e); res.status(500).json({ error: 'Error en checkout' }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Error en checkout' }); }
 });
 
-// ---- BUSINESS: orders ----
-app.get('/api/business/orders', requireBusiness, async (req, res)=>{
+
+// ======================
+// Rutas: BUSINESS (orders)
+// ======================
+app.get('/api/business/orders', requireBusiness, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT o.*, p.title, p.price_xaf FROM orders o
@@ -470,14 +526,14 @@ app.get('/api/business/orders', requireBusiness, async (req, res)=>{
        WHERE o.business_id=$1
        ORDER BY o.created_at DESC LIMIT 300`, [req.businessId]);
     res.json({ items: rows, delivery_fee_xaf: DELIVERY_FEE_XAF });
-  } catch(e){ console.error(e); res.status(500).json({ error: 'Error' }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Error' }); }
 });
 
-app.put('/api/business/orders/:id', requireBusiness, async (req, res)=>{
+app.put('/api/business/orders/:id', requireBusiness, async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { status } = req.body;
-    const allowed = ['new','accepted','rejected','fulfilled'];
+    const allowed = ['new', 'accepted', 'rejected', 'fulfilled'];
     if (!allowed.includes(status)) return res.status(400).json({ error: 'Estado inválido' });
     const { rows } = await pool.query(
       `UPDATE orders SET status=$1 WHERE id=$2 AND business_id=$3 RETURNING *`,
@@ -485,23 +541,30 @@ app.put('/api/business/orders/:id', requireBusiness, async (req, res)=>{
     );
     if (!rows.length) return res.status(404).json({ error: 'No encontrado' });
     res.json({ order: rows[0] });
-  } catch(e){ console.error(e); res.status(500).json({ error: 'Error' }); }
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Error' }); }
 });
 
-// --- 404 JSON para /api ---
+
+// ======================
+// 404 JSON para /api
+// ======================
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada' });
 });
 
-// --- Manejador global de errores ---
+
+// ======================
+// Manejador global de errores
+// ======================
 app.use((err, req, res, next) => {
   console.error('❌ Unhandled error:', err);
   res.status(500).json({ error: 'Error del servidor' });
 });
 
+
 // ======================
 // Iniciar servidor
 // ======================
 migrate()
-  .then(()=> app.listen(PORT, ()=> console.log('🚀 wapmarket backend on :' + PORT)))
-  .catch((e)=>{ console.error('Migration failed', e); process.exit(1); });
+  .then(() => app.listen(PORT, () => console.log('🚀 wapmarket backend on :' + PORT)))
+  .catch((e) => { console.error('Migration failed', e); process.exit(1); });
