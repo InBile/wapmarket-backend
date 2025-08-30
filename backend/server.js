@@ -173,9 +173,7 @@ app.post('/api/business/upload-image', requireBusiness, upload.single('image'), 
   try {
     if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
 
-    // Usamos directamente el buffer en memoria
-    const base64Image = req.file.buffer.toString('base64');
-
+    const base64Image = req.file.buffer.toString('base64'); // ✅ usar buffer
     const formData = new FormData();
     formData.append('image', base64Image);
 
@@ -185,19 +183,15 @@ app.post('/api/business/upload-image', requireBusiness, upload.single('image'), 
     );
 
     const data = await response.json();
+    if (data?.success) return res.json({ url: data.data?.url });
 
-    if (data?.success) {
-      return res.json({ url: data.data?.url });
-    } else {
-      console.error('ImgBB error:', data);
-      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
-    }
+    console.error('ImgBB error:', data);
+    return res.status(500).json({ error: 'Error subiendo a ImgBB' });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Error subiendo imagen' });
+    return res.status(500).json({ error: 'Error interno' });
   }
 });
-
 
 // ======================
 // Subida a ImgBB (helper para front)
