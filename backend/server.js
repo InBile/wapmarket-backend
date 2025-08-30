@@ -13,6 +13,35 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fetch from "node-fetch";
+
+const upload = multer();
+const router = express.Router();
+
+// Subida a ImgBB
+router.post("/upload", upload.single("image"), async (req, res) => {
+  try {
+    const apiKey = process.env.IMGBB_KEY; // guarda tu API key en Railway
+    const imageBuffer = req.file.buffer.toString("base64");
+
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+      method: "POST",
+      body: new URLSearchParams({ image: imageBuffer }),
+    });
+
+    const result = await response.json();
+    if (!result.success) return res.status(400).json({ error: "Error subiendo a ImgBB" });
+
+    // Devuelve la URL que podrás guardar en tu tabla products.image_url
+    res.json({ url: result.data.url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Fallo en la subida" });
+  }
+});
+
+export default router;
+
 
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
