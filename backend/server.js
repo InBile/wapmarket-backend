@@ -505,52 +505,85 @@ app.post('/api/business/upload-image', requireBusiness, upload.single('image'), 
 // ======================
 // Crear producto de negocio
 // ======================
+// ======================
+// Rutas: BUSINESS (products)
+// ======================
+
+// Crear producto
 app.post('/api/business/products', requireBusiness, async (req, res) => {
   try {
     const { title, description, category, price_xaf, image_url } = req.body;
+    if (!title) return res.status(400).json({ error: 'Falta título' });
 
-    if (!title || !price_xaf) {
-      return res.status(400).json({ error: "Título y precio son requeridos" });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO products (business_id, title, description, category, price_xaf, image_url)
-       VALUES ($1, $2, $3, $4, $5, $6)
+    const { rows } = await pool.query(
+      `INSERT INTO products(business_id, title, description, category, price_xaf, image_url, active)
+       VALUES ($1,$2,$3,$4,$5,$6,true)
        RETURNING *`,
-      [
-        req.businessId, // ✅ viene del middleware requireBusiness
-        title,
-        description || "",
-        category || "",
-        price_xaf,
-        image_url || null
-      ]
+      [req.businessId, title, description || null, category || null, price_xaf || 0, image_url || null]
     );
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("Error creando producto:", err);
-    res.status(500).json({ error: "Error creando producto" });
+    res.json({ product: rows[0] });
+  } catch (e) {
+    console.error('❌ Error creando producto:', e);
+    res.status(500).json({ error: 'Error creando producto' });
   }
 });
-// ======================
-// Listar productos de un negocio (solo sus productos)
-// ======================
+
+// Listar productos del negocio autenticado
 app.get('/api/business/products', requireBusiness, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, title, description, category, price_xaf, image_url, created_at, active
-       FROM products
-       WHERE business_id = $1
+      `SELECT * FROM products 
+       WHERE business_id=$1 
        ORDER BY created_at DESC`,
       [req.businessId]
     );
     res.json({ items: rows });
-  } catch (err) {
-    console.error("Error listando productos:", err);
-    res.status(500).json({ error: "Error listando productos" });
+  } catch (e) {
+    console.error('❌ Error listando productos:', e);
+    res.status(500).json({ error: 'Error listando productos' });
   }
 });
+
+// Actualizar producto
+app.put('/api/business/products/:id', requireBusiness, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido' });
+
+    const fields = ['title', 'description', 'category', 'price_xaf', 'image_url', 'active'];
+    const updates = [];
+    const values = [];
+    let idx = 1;
+
+    for (const f of fields) {
+      if (f in req.body) {
+        updates.push(`${f}=$${idx}`);
+        values.push(req.body[f]);
+        idx++;
+      }
+    }
+
+    if (!updates.length) return res.status(400).json({ error: 'Nada que actualizar' });
+
+    values.push(id);
+    values.push(req.businessId);
+
+    const sql = `UPDATE products 
+                 SET ${updates.join(',')} 
+                 WHERE id=$${idx} AND business_id=$${idx+1}
+                 RETURNING *`;
+
+    const { rows } = await pool.query(sql, values);
+    if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado' });
+
+    res.json({ product: rows[0] });
+  } catch (e) {
+    console.error('❌ Error actualizando producto:', e);
+    res.status(500).json({ error: 'Error actualizando producto' });
+  }
+});
+
 
 // ======================
 // Rutas: PUBLIC (checkout / orders)
