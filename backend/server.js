@@ -17,12 +17,45 @@ import fetch from "node-fetch";
 
 dotenv.config();
 
-// ⚠️ Solo una vez estas dos líneas
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const { Pool } = pg;
 
+// Configuración de subida (multer en memoria)
+const upload = multer();
+
+// Router para subida de imágenes a ImgBB
+const router = express.Router();
+
+router.post("/upload", upload.single("image"), async (req, res) => {
+  try {
+    const apiKey = process.env.IMGBB_KEY; // Tu API key de ImgBB
+    const imageBuffer = req.file.buffer.toString("base64");
+
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+      method: "POST",
+      body: new URLSearchParams({ image: imageBuffer }),
+    });
+
+    const result = await response.json();
+    if (!result.success) {
+      return res.status(400).json({ error: "Error subiendo a ImgBB" });
+    }
+
+    // Devuelve la URL final que puedes guardar en products.image_url
+    res.json({ url: result.data.url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Fallo en la subida" });
+  }
+});
+
+export default router;
+
+// ======================
+// Variables de entorno
+// ======================
 if (!process.env.DATABASE_URL) {
   console.error('❌ Falta DATABASE_URL en variables de entorno');
   process.exit(1);
@@ -33,42 +66,17 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@wapmarket.com';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s=>s.trim()).filter(Boolean);
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 const DELIVERY_FEE_XAF = Number(process.env.DELIVERY_FEE_XAF || 2000);
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: process.env.PGSSLMODE 
-    ? { rejectUnauthorized: false } 
-    : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
-});
-
-// 👉 Configuración de multer
-const upload = multer();
-
-// 👉 Ruta para subir imágenes a ImgBB
-const app = express();
-app.post("/api/upload", upload.single("image"), async (req, res) => {
-  try {
-    const apiKey = process.env.IMGBB_KEY; 
-    if (!apiKey) return res.status(500).json({ error: "Falta IMGBB_KEY en variables de entorno" });
-
-    const imageBuffer = req.file.buffer.toString("base64");
-
-    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-      method: "POST",
-      body: new URLSearchParams({ image: imageBuffer }),
-    });
-
-    const result = await response.json();
-    if (!result.success) return res.status(400).json({ error: "Error subiendo a ImgBB" });
-
-    res.json({ url: result.data.url });
-  } catch (err) {
-    console.error("❌ Error en subida ImgBB:", err);
-    res.status(500).json({ error: "Fallo en la subida" });
-  }
+  ssl: process.env.PGSSLMODE
+    ? { rejectUnauthorized: false }
+    : (process.env.NODE_ENV === 'production'
+      ? { rejectUnauthorized: false }
+      : false),
 });
 
 export default router;
