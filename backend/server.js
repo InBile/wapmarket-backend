@@ -169,11 +169,11 @@ function absoluteUrl(req, filename) {
 // ======================
 // Subida a ImgBB (backend)
 // ======================
-app.post('/api/upload', upload.single('image'), async (req, res) => {
+app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
 
-    // Convertir a base64 directamente desde buffer
+    // Usamos directamente el buffer en memoria
     const base64Image = req.file.buffer.toString('base64');
 
     const formData = new FormData();
@@ -192,9 +192,9 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
       console.error('ImgBB error:', data);
       return res.status(500).json({ error: 'Error subiendo a ImgBB' });
     }
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error subiendo imagen' });
   }
 });
 
