@@ -31,7 +31,8 @@ dotenv.config();
 // ===== Utilidades de ruta (ESM) =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
+// ⚡️ Configuración de multer en memoria
+const upload = multer({ storage: multer.memoryStorage() });
 
 // ===== PostgreSQL (pg) =====
 const { Pool } = pg;
