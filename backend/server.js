@@ -533,7 +533,24 @@ app.post('/api/business/products', requireBusiness, async (req, res) => {
     res.status(500).json({ error: "Error creando producto" });
   }
 });
-
+// ======================
+// Listar productos de un negocio (solo sus productos)
+// ======================
+app.get('/api/business/products', requireBusiness, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, title, description, category, price_xaf, image_url, created_at, active
+       FROM products
+       WHERE business_id = $1
+       ORDER BY created_at DESC`,
+      [req.businessId]
+    );
+    res.json({ items: rows });
+  } catch (err) {
+    console.error("Error listando productos:", err);
+    res.status(500).json({ error: "Error listando productos" });
+  }
+});
 
 // ======================
 // Rutas: PUBLIC (checkout / orders)
