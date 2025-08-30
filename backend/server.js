@@ -502,6 +502,37 @@ app.post('/api/business/upload-image', requireBusiness, upload.single('image'), 
     res.status(500).json({ error: 'Error subiendo imagen' });
   }
 });
+// ======================
+// Crear producto de negocio
+// ======================
+app.post('/api/business/products', requireBusiness, async (req, res) => {
+  try {
+    const { title, description, category, price_xaf, image_url } = req.body;
+
+    if (!title || !price_xaf) {
+      return res.status(400).json({ error: "Título y precio son requeridos" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO products (business_id, title, description, category, price_xaf, image_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        req.businessId, // ✅ viene del middleware requireBusiness
+        title,
+        description || "",
+        category || "",
+        price_xaf,
+        image_url || null
+      ]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Error creando producto:", err);
+    res.status(500).json({ error: "Error creando producto" });
+  }
+});
 
 
 // ======================
