@@ -16,8 +16,11 @@ import { fileURLToPath } from 'url';
 import fetch from "node-fetch";
 
 dotenv.config();
+
+// ⚠️ Solo una vez estas dos líneas
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 const { Pool } = pg;
 
 if (!process.env.DATABASE_URL) {
@@ -45,11 +48,10 @@ const pool = new Pool({
 const upload = multer();
 
 // 👉 Ruta para subir imágenes a ImgBB
-// Se usa en productos o negocios para guardar la URL
 const app = express();
 app.post("/api/upload", upload.single("image"), async (req, res) => {
   try {
-    const apiKey = process.env.IMGBB_KEY; // agrega tu API key en Railway
+    const apiKey = process.env.IMGBB_KEY; 
     if (!apiKey) return res.status(500).json({ error: "Falta IMGBB_KEY en variables de entorno" });
 
     const imageBuffer = req.file.buffer.toString("base64");
@@ -62,7 +64,6 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
     const result = await response.json();
     if (!result.success) return res.status(400).json({ error: "Error subiendo a ImgBB" });
 
-    // Devuelve la URL que puedes guardar en products.image_url o businesses.logo_url
     res.json({ url: result.data.url });
   } catch (err) {
     console.error("❌ Error en subida ImgBB:", err);
