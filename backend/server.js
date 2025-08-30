@@ -138,18 +138,16 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'), false);
   }
 }));
-// ✅ CORS fix
 app.use(cors({
   origin: [
-    "https://wapmarket-frontend.vercel.app", // tu frontend en Vercel
-    "http://localhost:3000" // opcional para pruebas locales
+    'https://wapmarket-frontend.vercel.app',
+    'http://localhost:3000'
   ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization']
 }));
+app.options('*', cors());
 
-// También manejar preflight
-app.options("*", cors());
 
 // ===== Seguridad / Perf / Logs =====
 app.use(helmet());
@@ -181,33 +179,73 @@ function absoluteUrl(req, filename) {
 // ======================
 // Subida a ImgBB (backend)
 // ======================
-// 🚀 Subir imagen a ImgBB
-async function uploadToImgBB(localFilePath) {
-  // leer archivo como base64 (lo que ImgBB necesita)
-  const imageBuffer = fs.readFileSync(localFilePath);
-  const base64Image = imageBuffer.toString("base64");
+// ✅ SUBIDA PÚBLICA A IMGBB (usa buffer, no path)
+app.post('/api/upload', upload.single('image'), async (req, res) => {
+  try {
+    if (!process.env.IMGBB_API_KEY) {
+      return res.status(500).json({ error: 'Falta IMGBB_API_KEY en el servidor' });
+    }
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'Falta imagen' });
+    }
 
-  const form = new FormData();
-  form.append("image", base64Image);
+    const base64Image = req.file.buffer.toString('base64');
+    const formData = new FormData();
+    formData.append('image', base64Image);
 
-  const res = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
-    method: "POST",
-    body: form,
-    headers: form.getHeaders(),
-  });
+    const resp = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
+      method: 'POST',
+      body: formData
+    });
 
-  const json = await res.json();
+    const data = await resp.json().catch(() => null);
 
-  // borrar archivo temporal
-  try { fs.unlinkSync(localFilePath); } catch {}
-
-  if (!json.success) {
-    console.error("❌ ImgBB error:", json);
-    throw new Error(json.error?.message || "Error subiendo a ImgBB");
+    if (!resp.ok || !data) {
+      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
+    }
+    if (data.success && data.data?.url) {
+      return res.json({ url: data.data.url });
+    }
+    return res.status(500).json({ error: data?.error?.message || 'Error subiendo a ImgBB' });
+  } catch (err) {
+    console.error('ImgBB upload error:', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
+});
 
-  return json.data.display_url;
-}
+// ✅ SUBIDA PROTEGIDA (NEGOCIO) A IMGBB (también usa buffer)
+app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
+  try {
+    if (!process.env.IMGBB_API_KEY) {
+      return res.status(500).json({ error: 'Falta IMGBB_API_KEY en el servidor' });
+    }
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: 'Falta imagen' });
+    }
+
+    const base64Image = req.file.buffer.toString('base64');
+    const formData = new FormData();
+    formData.append('image', base64Image);
+
+    const resp = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await resp.json().catch(() => null);
+
+    if (!resp.ok || !data) {
+      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
+    }
+    if (data.success && data.data?.url) {
+      return res.json({ url: data.data.url });
+    }
+    return res.status(500).json({ error: data?.error?.message || 'Error subiendo a ImgBB' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Error subiendo imagen' });
+  }
+});
 // ======================
 // Subida a ImgBB (helper para front)
 // ======================
