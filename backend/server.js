@@ -51,8 +51,6 @@ router.post("/upload", upload.single("image"), async (req, res) => {
   }
 });
 
-export default router;
-
 // ======================
 // Variables de entorno
 // ======================
@@ -77,6 +75,24 @@ const pool = new Pool({
     : (process.env.NODE_ENV === 'production'
       ? { rejectUnauthorized: false }
       : false),
+});
+
+// === Aquí ya montas tu app principal ===
+const app = express();
+
+// Middlewares
+app.use(cors());
+app.use(helmet());
+app.use(compression());
+app.use(express.json());
+app.use(morgan('dev'));
+
+// Conectar el router de subida
+app.use("/api", router);
+
+// Ejemplo: levantar servidor
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
 });
 
 export default router;
