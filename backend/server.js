@@ -1,688 +1,294 @@
-// =======================================================
-// server.js — WapMarket backend (Node 18.20.5, ESM)
-// Ordenado y listo para copiar/pegar
-// =======================================================
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vendedor — WapMarket</title>
+  <link rel="stylesheet" href="/styles.css">
 
-// ===== Imports =====
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import compression from 'compression';
-import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
-import pg from 'pg';
-import dotenv from 'dotenv';
-import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
-import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import FormData from 'form-data'; // Para subida a ImgBB desde el backend
+<style>
+:root{
+  --amz-dark:#131921;
+  --amz-light:#232f3e;
+  --amz-yellow:#febd69;
+  --amz-border:#e6e6e6;
+  --link:#007185;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#eaeded;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#111}
+.header{position:sticky;top:0;z-index:50;background:var(--amz-dark);padding:10px 0}
+.wrapper{max-width:1200px;margin:0 auto;padding:0 16px}
+.row{display:flex;align-items:center;gap:12px}
+.logo{color:#fff;font-weight:800;letter-spacing:.2px}
+.logout-btn{background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff}
+.logout-btn:hover{background:rgba(255,255,255,.08)}
+/* Business identity */
+.biz-head{color:#fff;margin-left:auto;display:flex;align-items:center;gap:8px}
+.biz-badge{display:inline-flex;align-items:center;gap:6px;color:#fff;font-weight:700}
+.biz-badge .v{width:18px;height:18px;border-radius:50%;background:#12b886;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:#fff}
 
-// Node 18.20.5 trae fetch global (no hace falta node-fetch)
+/* Cards */
+.card{background:#fff;border:1px solid var(--amz-border);border-radius:0;box-shadow:none;margin:16px 0}
+h3{margin:0 0 12px}
+label{display:block;margin:10px 0;font-weight:600}
+input,select,textarea{width:100%;height:40px;padding:8px;border:1px solid var(--amz-border);border-radius:4px;background:#fff}
+textarea{height:88px;resize:vertical}
+.btn{height:38px;border-radius:20px;padding:0 16px;border:1px solid #d5d9d9;background:var(--amz-yellow);font-weight:700;color:#111;cursor:pointer}
+.btn.ghost{background:#fff;border:1px solid var(--amz-border);}
+.btn.danger{background:#fff;border:1px solid #b12704;color:#b12704}
+.btn.small{height:30px;border-radius:14px;padding:0 10px;font-size:.9rem}
 
+/* Tables */
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{border-bottom:1px solid var(--amz-border);padding:10px;vertical-align:middle;text-align:left;background:#fff}
+.table th{background:#f8f8f8}
+.table img{border-radius:4px}
+.table-actions{display:flex;gap:8px;flex-wrap:wrap}
 
-// ===== Cargar variables de entorno =====
-dotenv.config();
+/* Responsive: make tables scroll on small screens */
+.table-wrap{overflow:auto}
+@media (max-width: 900px){
+  .row.wrap{flex-wrap:wrap}
+  .biz-head{order:3;width:100%;justify-content:flex-start;margin:6px 0 0}
+}
+@media (max-width: 640px){
+  .wrapper{padding:0 10px}
+  .table th,.table td{padding:8px}
+}
+</style>
 
+</head>
+<body>
+<header class="header">
+  <div class="row wrapper">
+    <div class="logo">WapMarket</div><div class="biz-head"><span id="bizName">Mi negocio</span><span id="bizVerified" class="biz-badge" style="display:none"><span class="v">✓</span> Verificado</span></div><button id="logoutBtn" class="btn logout-btn">Cerrar sesión</button>
+  </div>
+</header>
 
-// ===== Utilidades de ruta (ESM) =====
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-// ⚡️ Configuración de multer en memoria
-const upload = multer({ storage: multer.memoryStorage() });
+<main class="wrapper">
+  <!-- Login -->
+  <div class="card" style="padding:16px;max-width:800px" id="loginBox">
+    <h3>Login de Negocio</h3>
+    <form onsubmit="return false;">
+      <label>Email <input id="lemail" type="email" required></label>
+      <label>Contraseña <input id="lpass" type="password" required></label>
+      <button class="btn" id="btnLogin">Entrar</button>
+    </form>
+  </div>
 
-// ===== PostgreSQL (pg) =====
-const { Pool } = pg;
+  <!-- Panel negocio -->
+  <div id="panel" style="display:none">
+    <!-- Publicar producto -->
+    <div class="card" style="padding:16px;max-width:800px">
+      <h3>Publicar producto</h3>
+      <form id="prodForm" onsubmit="return false;">
+        <label>Título <input id="title" required></label>
+        <label>Descripción <textarea id="description"></textarea></label>
+        <label>Categoría
+          <select id="category">
+            <option>Servicios</option><option>Comida</option><option>Tiendas</option>
+            <option>Salud</option><option>Transporte</option><option>Tecnología</option>
+          </select>
+        </label>
+        <label>Precio (XAF) <input id="price" type="number" min="0"></label>
+        <label>Imagen (archivo) <input id="image" type="file" accept="image/*"></label>
+        <button class="btn" id="btnPublicar">Publicar</button>
+      </form>
+    </div>
 
+    <!-- Pedidos -->
+    <div class="card" style="padding:16px;max-width:1100px">
+      <h3>Pedidos</h3>
+      <div class="table-wrap"><table class="table" id="ordersTable">
+        <thead><tr><th>ID</th><th>Grupo</th><th>Producto</th><th>Precio</th><th>Cant.</th>
+        <th>Cliente</th><th>Teléfono</th><th>Envío</th><th>Dirección</th><th>Estado</th><th>Acciones</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
 
-// ======================
-// Variables de entorno
-// ======================
-if (!process.env.DATABASE_URL) {
-  console.error('❌ Falta DATABASE_URL en variables de entorno');
-  process.exit(1);
+    <!-- Productos -->
+    <div class="card" style="padding:16px;max-width:1100px">
+      <h3>Mis Productos</h3>
+      <div class="table-wrap"><table class="table" id="productsTable">
+        <thead>
+          <tr>
+            <th>ID</th><th>Título</th><th>Categoría</th><th>Precio</th><th>Imagen</th><th>Creado</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  </div>
+</main>
+
+<script src="/api.js"></script>
+<script>
+
+// API DELETE polyfill si no existe
+if (!API.delete){
+  API.delete = function(url, opts){ opts = opts||{}; opts.method='DELETE'; return API.request(url, null, opts); };
 }
 
-const PORT = Number(process.env.PORT || 8080);
-const DATABASE_URL = process.env.DATABASE_URL;
-const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret';
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@wapmarket.com';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean);
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
-const DELIVERY_FEE_XAF = Number(process.env.DELIVERY_FEE_XAF || 2000);
+let token = null; 
+let business_id = null;
+function authHeaders(){ return token ? { 'Authorization':'Bearer '+token } : {}; }
 
 
-// ===== Pool de conexión =====
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: process.env.PGSSLMODE
-    ? { rejectUnauthorized: false }
-    : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
-});
-
-
-// ======================
-// Migraciones
-// ======================
-async function migrate() {
-  const sql = `
-  CREATE TABLE IF NOT EXISTS businesses (
-    id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE,
-    phone TEXT,
-    location TEXT,
-    business_type TEXT NOT NULL CHECK (business_type IN ('verified','unverified')) DEFAULT 'unverified',
-    login_email TEXT UNIQUE,
-    password_hash TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
-  );
-
-  CREATE TABLE IF NOT EXISTS products (
-    id SERIAL PRIMARY KEY,
-    business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    description TEXT,
-    category TEXT,
-    price_xaf INTEGER,
-    image_url TEXT,
-    active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT now()
-  );
-
-  CREATE TABLE IF NOT EXISTS orders (
-    id SERIAL PRIMARY KEY,
-    group_id TEXT,
-    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    business_id INTEGER NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
-    qty INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
-    customer_name TEXT,
-    customer_phone TEXT,
-    address TEXT,
-    note TEXT,
-    delivery BOOLEAN DEFAULT FALSE,
-    delivery_fee_xaf INTEGER DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','accepted','rejected','fulfilled')),
-    created_at TIMESTAMPTZ DEFAULT now()
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_products_search
-  ON products USING GIN (to_tsvector('spanish', coalesce(title,'') || ' ' || coalesce(description,'')));
-  CREATE INDEX IF NOT EXISTS idx_products_category ON products (category);
-  CREATE INDEX IF NOT EXISTS idx_products_active ON products (active);
-  CREATE INDEX IF NOT EXISTS idx_businesses_type ON businesses (business_type);
-  CREATE INDEX IF NOT EXISTS idx_orders_business ON orders (business_id, status, created_at DESC);
-  `;
-  await pool.query(sql);
-  console.log('✅ DB migrate: OK');
+// ============= PERFIL DEL NEGOCIO (nombre e insignia) =============
+async function loadProfile(){
+  try{
+    let me = await API.get('/business/me', { headers: authHeaders() });
+    if (me && me.name){ document.getElementById('bizName').textContent = me.name; }
+    if (me && (me.verified || me.is_verified)){ document.getElementById('bizVerified').style.display='inline-flex'; }
+    if (me && me.info){ document.getElementById('bizName').title = me.info; }
+  }catch(e){
+    // fallback silencioso si el endpoint no existe
+    console.warn('No se pudo cargar el perfil del negocio', e);
+  }
 }
 
+// ============= UTIL: mapa de pedidos para acciones rápidas =============
+const ordersMap = {};
 
-// ======================
-// App principal
-// ======================
-const app = express();
-app.set('trust proxy', 1);
-
-// ===== CORS =====
-app.use(cors({
-  origin: function (origin, cb) {
-    if (!origin) return cb(null, true);
-    if (CORS_ORIGINS.length === 0 || CORS_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(new Error('Not allowed by CORS'), false);
-  }
-}));
-app.use(cors({
-  origin: [
-    'https://wapmarket-frontend.vercel.app',
-    'http://localhost:3000'
-  ],
-  methods: ['GET','POST','PUT','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization']
-}));
-app.options('*', cors());
-
-
-// ===== Seguridad / Perf / Logs =====
-app.use(helmet());
-app.use(compression());
-app.use(express.json({ limit: '2mb' }));
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
-
-// ===== Rate limit público =====
-const limiter = rateLimit({ windowMs: 60 * 1000, max: 180 });
-app.use('/api/public', limiter);
-
-
-// ======================
-// Subida a ImgBB (backend)
-// ======================
-// 📌 Subida de imágenes a ImgBB
-app.post("/api/business/upload-image", upload.single("image"), async (req, res) => {
-  try {
-    console.log("=== [UPLOAD IMAGE DEBUG] ===");
-    console.log("KEY?", process.env.IMGBB_API_KEY ? "OK" : "MISSING");
-    console.log("FILE?", req.file ? req.file.originalname : "NO FILE");
-
-    if (!process.env.IMGBB_API_KEY) {
-      return res.status(500).json({ error: "Falta IMGBB_API_KEY en el servidor" });
-    }
-    if (!req.file) {
-      return res.status(400).json({ error: "No se recibió archivo" });
-    }
-
-    // Convertir a base64
-    const base64 = req.file.buffer.toString("base64");
-
-    // Llamada a ImgBB
-    const formData = new URLSearchParams();
-    formData.append("key", process.env.IMGBB_API_KEY);
-    formData.append("image", base64);
-
-    const resp = await fetch("https://api.imgbb.com/1/upload", {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await resp.json();
-    console.log("ImgBB response:", data);
-
-    if (!data.success) {
-      return res.status(500).json({ error: "ImgBB error", details: data });
-    }
-
-    res.json({ url: data.data.url });
-  } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({ error: "Error subiendo a ImgBB", details: err.message });
-  }
-});
-
-// ✅ SUBIDA PROTEGIDA (NEGOCIO) A IMGBB (también usa buffer)
-app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
-  try {
-    if (!process.env.IMGBB_API_KEY) {
-      return res.status(500).json({ error: 'Falta IMGBB_API_KEY en el servidor' });
-    }
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ error: 'Falta imagen' });
-    }
-
-    const base64Image = req.file.buffer.toString('base64');
-    const formData = new FormData();
-    formData.append('image', base64Image);
-
-    const resp = await fetch(`https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`, {
-      method: 'POST',
-      body: formData
-    });
-
-    const data = await resp.json().catch(() => null);
-
-    if (!resp.ok || !data) {
-      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
-    }
-    if (data.success && data.data?.url) {
-      return res.json({ url: data.data.url });
-    }
-    return res.status(500).json({ error: data?.error?.message || 'Error subiendo a ImgBB' });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Error subiendo imagen' });
-  }
-});
-// ======================
-// Subida a ImgBB (helper para front)
-// ======================
-// Nota: este helper exportado usa fetch + FormData (no toques esto si lo usas desde el front)
-export async function uploadImageToApi(
-  file,
-  { endpoint = '/api/upload', token, apiBase = (typeof process !== 'undefined' ? (process.env?.NEXT_PUBLIC_API_BASE_URL || '') : '') } = {}
-) {
-  if (!file) throw new Error('Selecciona un archivo');
-  if (!file.type?.startsWith('image/')) throw new Error('El archivo debe ser una imagen');
-  if (file.size > 6 * 1024 * 1024) throw new Error('La imagen no puede superar 6MB');
-
-  const formData = new FormData();
-  formData.append('image', file);
-
-  const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`; // por si usas ruta protegida
-
-  let res;
-  try {
-    res = await fetch(`${apiBase}${endpoint}`, {
-      method: 'POST',
-      headers, // NO pongas Content-Type manualmente con FormData
-      body: formData,
-    });
-  } catch (e) {
-    throw new Error('No se pudo conectar con el servidor. Revisa tu red o la URL del API.');
-  }
-
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    throw new Error(`Respuesta inválida del servidor (HTTP ${res.status}).`);
-  }
-
-  if (!res.ok || data?.error) {
-    throw new Error(data?.error || `Error subiendo imagen (HTTP ${res.status}).`);
-  }
-
-  if (!data?.url) {
-    throw new Error('El servidor no devolvió la URL de la imagen.');
-  }
-
-  return data.url;
+// ============= ENVIAR WHATSAPP AL CLIENTE =============
+function sendWhatsAppForOrder(order, newStatus){
+  try{
+    if(!order) return;
+    const phone = String(order.customer_phone||'').replace(/[^0-9]/g,'');
+    if(!phone) return;
+    const delivery = order.delivery ? `Sí (+${Number(order.delivery_fee_xaf||0).toLocaleString()} XAF)` : 'No';
+    const total = (Number(order.price_xaf||0) * Number(order.qty||1)) + Number(order.delivery ? (order.delivery_fee_xaf||0):0);
+    const text = [
+      'WapMarket — Confirmación de pedido',
+      `Negocio: ${document.getElementById('bizName').textContent}`,
+      `Pedido #${order.id} (grupo ${order.group_id||'-'})`,
+      `Producto: ${order.title}`,
+      `Cantidad: ${order.qty}`,
+      `Envío: ${delivery}`,
+      `Total: ${total.toLocaleString()} XAF`,
+      `Estado: ${newStatus}`,
+      '',
+      'Gracias por su compra.'
+    ].join('\n');
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
+  }catch(err){ console.warn('WhatsApp falló', err); }
 }
 
+// ================== LOGIN ==================
+document.getElementById('btnLogin').addEventListener('click', async ()=>{
+  const res = await API.post('/business/login', { email: lemail.value, password: lpass.value });
+  if (res.error){ alert(res.error); return; }
+  token = res.token; business_id = res.business_id;
+  localStorage.setItem('bizToken', token);
+  localStorage.setItem('bizId', String(business_id));
+  document.getElementById('loginBox').style.display='none';
+  document.getElementById('panel').style.display='block';
+  loadOrders();
+  loadProducts(); // ✅ cargar productos al entrar
+  loadProfile();
+});
 
-// ======================
-// AUTH HELPERS (JWT)
-// ======================
-function signToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
+// Autologin si ya hay token guardado
+token = localStorage.getItem('bizToken'); 
+business_id = Number(localStorage.getItem('bizId')||0);
+if (token && business_id){ 
+  document.getElementById('loginBox').style.display='none'; 
+  document.getElementById('panel').style.display='block'; 
+  loadOrders(); 
+  loadProducts(); // ✅ también aquí
+  loadProfile();
 }
 
-function requireAdmin(req, res, next) {
-  try {
-    const hdr = req.headers.authorization || '';
-    const token = hdr.startsWith('Bearer ') ? hdr.slice(7) : '';
-    const data = jwt.verify(token, JWT_SECRET);
-    if (!data || data.role !== 'admin') return res.status(401).json({ error: 'No autorizado' });
-    req.admin = { email: data.email };
-    next();
-  } catch (e) { return res.status(401).json({ error: 'No autorizado' }); }
+// ================== PUBLICAR PRODUCTO ==================
+document.getElementById('btnPublicar').addEventListener('click', async ()=>{
+  if (!token) return alert('Primero inicia sesión');
+  let imageUrl = '';
+  const file = document.getElementById('image').files[0];
+  if (file){
+    const fd = new FormData(); 
+    fd.append('image', file);
+    const up = await API.upload('/business/upload-image', fd, { headers: authHeaders() });
+    if (up.error) return alert(up.error);
+    imageUrl = up.url;
+  }
+  const payload = {
+    title: title.value, 
+    description: description.value, 
+    category: category.value,
+    price_xaf: Number(price.value || 0), 
+    image_url: imageUrl
+  };
+  const res = await API.post('/business/products', payload, { headers: authHeaders() });
+  if (res.error){ alert(res.error); return; }
+  alert('Producto publicado');
+  document.getElementById('prodForm').reset();
+  loadProducts(); // ✅ refrescar lista tras publicar
+});
+
+// ================== CARGAR PEDIDOS ==================
+async function loadOrders(){
+  if (!token) return;
+  const data = await API.get('/business/orders', { headers: authHeaders() });
+  const tb = document.querySelector('#ordersTable tbody'); 
+  tb.innerHTML='';
+  
+(data.items||[]).forEach(o=>{
+  const tr = document.createElement('tr');
+  const deliveryTxt = o.delivery ? ('Sí (+'+Number(o.delivery_fee_xaf||0).toLocaleString()+' XAF)') : 'No';
+  tr.innerHTML = `<td>${o.id}</td><td>${o.group_id||''}</td><td>${o.title}</td><td>${Number(o.price_xaf||0).toLocaleString()} XAF</td><td>${o.qty}</td>
+                  <td>${o.customer_name||''}</td><td>${o.customer_phone||''}</td><td>${deliveryTxt}</td><td>${o.address||''}</td>
+                  <td><span class="small">${o.status}</span></td>
+                  <td class="table-actions">
+                    <button class="btn small" data-id="${o.id}" data-s="accepted">Aceptar</button>
+                    <button class="btn small ghost" data-id="${o.id}" data-s="rejected">Rechazar</button>
+                    <button class="btn small" data-id="${o.id}" data-s="fulfilled">Entregado</button>
+                  </td>`;
+  tb.appendChild(tr);
+  ordersMap[o.id] = o;
+});
+
+  tb.onclick = async (e)=>{
+    const btn = e.target.closest('button.btn'); if (!btn) return;
+    const id = btn.getAttribute('data-id'); 
+    const s = btn.getAttribute('data-s');
+    const r = await API.put('/business/orders/'+id, { status:s }, { headers: authHeaders() });
+    if (r.error) return alert(r.error);
+    try{ sendWhatsAppForOrder(ordersMap[id], s); }catch(_){}
+    loadOrders();
+  };
 }
 
-function requireBusiness(req, res, next) {
-  try {
-    const hdr = req.headers.authorization || '';
-    const token = hdr.startsWith('Bearer ') ? hdr.slice(7) : '';
-    const data = jwt.verify(token, JWT_SECRET);
-    if (!data || data.role !== 'business') return res.status(401).json({ error: 'No autorizado' });
-    req.businessId = Number(data.business_id);
-    next();
-  } catch (e) { return res.status(401).json({ error: 'No autorizado' }); }
-}
-
-
-// ======================
-// Rutas: AUTH
-// ======================
-app.post('/api/admin/login', (req, res) => {
-  const { email, password } = req.body || {};
-  if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-    return res.json({ token: signToken({ role: 'admin', email }) });
-  }
-  res.status(401).json({ error: 'Credenciales inválidas' });
-});
-
-app.post('/api/business/login', async (req, res) => {
-  try {
-    const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'Faltan credenciales' });
-    const { rows } = await pool.query('SELECT id, login_email, password_hash FROM businesses WHERE login_email=$1', [email]);
-    if (!rows.length || !rows[0].password_hash) return res.status(401).json({ error: 'Credenciales inválidas' });
-    const ok = await bcrypt.compare(password, rows[0].password_hash);
-    if (!ok) return res.status(401).json({ error: 'Credenciales inválidas' });
-    const token = signToken({ role: 'business', business_id: rows[0].id, email });
-    res.json({ token, business_id: rows[0].id });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-});
-
-
-// ======================
-// Rutas: ADMIN Businesses CRUD
-// ======================
-app.post('/api/admin/businesses', requireAdmin, async (req, res) => {
-  try {
-    const { name, email, phone, location, login_email, password } = req.body;
-    let { business_type } = req.body;
-
-    if (!name) return res.status(400).json({ error: 'Nombre requerido' });
-    if (!login_email || !password) return res.status(400).json({ error: 'Login y contraseña requeridos' });
-
-    if (business_type !== 'verified') business_type = 'unverified';
-
-    const hash = await bcrypt.hash(password, 10);
-    const { rows } = await pool.query(
-      `INSERT INTO businesses(name, email, phone, location, business_type, login_email, password_hash)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       RETURNING id, name, email, phone, location, business_type, login_email, created_at`,
-      [name, email || null, phone || null, location || null, business_type, login_email, hash]
-    );
-    res.json({ business: rows[0] });
-  } catch (e) {
-    if (String(e).includes('duplicate key')) {
-      res.status(409).json({ error: 'Email o login_email ya existe' });
-    } else {
-      console.error('❌ Error creando negocio:', e);
-      res.status(500).json({ error: 'Error del servidor' });
-    }
-  }
-});
-
-app.get('/api/admin/businesses', requireAdmin, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      'SELECT id, name, email, phone, location, business_type, login_email, created_at FROM businesses ORDER BY created_at DESC LIMIT 500'
-    );
-    res.json({ items: rows });
-  } catch (e) {
-    console.error('❌ Error listando negocios:', e);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-});
-
-app.put('/api/admin/businesses/:id', requireAdmin, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: 'ID inválido' });
-
-    const fields = ['name', 'email', 'phone', 'location', 'business_type', 'login_email'];
-    const updates = [];
-    const values = [];
-    let idx = 1;
-
-    for (const f of fields) {
-      if (f in req.body) {
-        if (f === 'business_type' && req.body[f] !== 'verified') {
-          req.body[f] = 'unverified';
-        }
-        updates.push(`${f}=$${idx}`);
-        values.push(req.body[f]);
-        idx++;
-      }
-    }
-    if ('password' in req.body && req.body.password) {
-      updates.push(`password_hash=$${idx}`);
-      values.push(await bcrypt.hash(req.body.password, 10));
-      idx++;
-    }
-    if (!updates.length) return res.status(400).json({ error: 'Nada para actualizar' });
-
-    values.push(id);
-    const sql = `UPDATE businesses SET ${updates.join(',')} WHERE id=$${idx} RETURNING id,name,login_email,business_type`;
-    const { rows } = await pool.query(sql, values);
-    if (!rows.length) return res.status(404).json({ error: 'No encontrado' });
-    res.json({ business: rows[0] });
-  } catch (e) {
-    console.error('❌ Error actualizando negocio:', e);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-});
-
-
-// ======================
-// Rutas: PUBLIC (listados)
-// ======================
-app.get('/api/public/businesses', async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, name, location, phone, business_type
-       FROM businesses
-       ORDER BY (CASE business_type WHEN 'verified' THEN 2 ELSE 1 END) DESC, created_at DESC`
-    );
-    res.json({ items: rows });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'Error del servidor' }); }
-});
-
-app.get('/api/public/products', async (req, res) => {
-  try {
-    const q = String(req.query.q || '').trim();
-    const category = String(req.query.category || '').trim();
-    const business_id = Number(req.query.business_id || 0);
-    const limit = Math.max(1, Math.min(50, Number(req.query.limit || 24)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
-
-    const params = [];
-    let where = 'p.active = TRUE';
-    if (business_id) { params.push(business_id); where += ` AND p.business_id = $${params.length}`; }
-    if (q) { params.push(q); where += ` AND to_tsvector('spanish', coalesce(p.title,'') || ' ' || coalesce(p.description,'')) @@ plainto_tsquery('spanish', $${params.length})`; }
-    if (category) { params.push(category); where += ` AND p.category = $${params.length}`; }
-
-    params.push(limit); params.push(offset);
-    const sql = `
-      SELECT p.*, b.name as business_name, b.phone, b.location, b.business_type
-      FROM products p
-      JOIN businesses b ON b.id = p.business_id
-      WHERE ${where}
-      ORDER BY p.created_at DESC
-      LIMIT $${params.length - 1} OFFSET $${params.length}
+// ================== CARGAR PRODUCTOS ==================
+async function loadProducts(){
+  if (!token) return;
+  const data = await API.get('/business/products', { headers: authHeaders() });
+  console.log("Productos del negocio:", data); // 🔎 debug
+  const tb = document.querySelector('#productsTable tbody');
+  tb.innerHTML='';
+  (data.items||[]).forEach(p=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${p.id}</td>
+      <td>${p.title}</td>
+      <td>${p.category||''}</td>
+      <td>${Number(p.price_xaf||0).toLocaleString()} XAF</td>
+      <td>${p.image_url ? `<img src="${p.image_url}" style="max-height:50px">` : ''}</td>
+      <td>${new Date(p.created_at).toLocaleString()}</td>
     `;
-    const { rows } = await pool.query(sql, params);
-    res.json({ items: rows, limit, offset });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Error del servidor' });
-  }
-});
-
-
-// ======================
-// Rutas: BUSINESS (uploads & products)
-// ======================
-app.post('/api/business/upload-image', requireBusiness, upload.single('image'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'Falta imagen' });
-
-    const base64Image = req.file.buffer.toString('base64');
-
-    const formData = new FormData();
-    formData.append('image', base64Image);
-
-    const response = await fetch(
-      `https://api.imgbb.com/1/upload?key=${process.env.IMGBB_API_KEY}`,
-      { method: 'POST', body: formData }
-    );
-
-    const data = await response.json();
-
-    if (data?.success) {
-      return res.json({ url: data.data?.url });
-    } else {
-      console.error('ImgBB error:', data);
-      return res.status(500).json({ error: 'Error subiendo a ImgBB' });
-    }
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Error subiendo imagen' });
-  }
-});
-// ======================
-// Crear producto de negocio
-// ======================
-// ======================
-// Rutas: BUSINESS (products)
-// ======================
-
-// Crear producto
-app.post('/api/business/products', requireBusiness, async (req, res) => {
-  try {
-    const { title, description, category, price_xaf, image_url } = req.body;
-    if (!title) return res.status(400).json({ error: 'Falta título' });
-
-    const { rows } = await pool.query(
-      `INSERT INTO products(business_id, title, description, category, price_xaf, image_url, active)
-       VALUES ($1,$2,$3,$4,$5,$6,true)
-       RETURNING *`,
-      [req.businessId, title, description || null, category || null, price_xaf || 0, image_url || null]
-    );
-
-    res.json({ product: rows[0] });
-  } catch (e) {
-    console.error('❌ Error creando producto:', e);
-    res.status(500).json({ error: 'Error creando producto' });
-  }
-});
-
-// Listar productos del negocio autenticado
-app.get('/api/business/products', requireBusiness, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT * FROM products 
-       WHERE business_id=$1 
-       ORDER BY created_at DESC`,
-      [req.businessId]
-    );
-    res.json({ items: rows });
-  } catch (e) {
-    console.error('❌ Error listando productos:', e);
-    res.status(500).json({ error: 'Error listando productos' });
-  }
-});
-
-// Actualizar producto
-app.put('/api/business/products/:id', requireBusiness, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    if (!id) return res.status(400).json({ error: 'ID inválido' });
-
-    const fields = ['title', 'description', 'category', 'price_xaf', 'image_url', 'active'];
-    const updates = [];
-    const values = [];
-    let idx = 1;
-
-    for (const f of fields) {
-      if (f in req.body) {
-        updates.push(`${f}=$${idx}`);
-        values.push(req.body[f]);
-        idx++;
-      }
-    }
-
-    if (!updates.length) return res.status(400).json({ error: 'Nada que actualizar' });
-
-    values.push(id);
-    values.push(req.businessId);
-
-    const sql = `UPDATE products 
-                 SET ${updates.join(',')} 
-                 WHERE id=$${idx} AND business_id=$${idx+1}
-                 RETURNING *`;
-
-    const { rows } = await pool.query(sql, values);
-    if (!rows.length) return res.status(404).json({ error: 'Producto no encontrado' });
-
-    res.json({ product: rows[0] });
-  } catch (e) {
-    console.error('❌ Error actualizando producto:', e);
-    res.status(500).json({ error: 'Error actualizando producto' });
-  }
-});
-
-
-// ======================
-// Rutas: PUBLIC (checkout / orders)
-// ======================
-app.post('/api/public/cart/checkout', async (req, res) => {
-  try {
-    const { items, customer_name, customer_phone, address, note, delivery } = req.body || {};
-    if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: 'Carrito vacío' });
-    if (!customer_phone) return res.status(400).json({ error: 'Falta teléfono' });
-
-    const ids = items.map(i => Number(i.product_id)).filter(Boolean);
-    const { rows: products } = await pool.query(
-      `SELECT id, business_id, price_xaf FROM products WHERE id = ANY($1::int[]) AND active=TRUE`,
-      [ids]
-    );
-    if (!products.length) return res.status(400).json({ error: 'Productos no válidos' });
-    const bizId = products[0].business_id;
-    if (products.some(p => p.business_id !== bizId)) {
-      return res.status(400).json({ error: 'Solo puedes comprar productos de un negocio a la vez' });
-    }
-
-    const groupId = crypto.randomUUID();
-    const fee = delivery ? DELIVERY_FEE_XAF : 0;
-    const created = [];
-
-    for (const it of items) {
-      const p = products.find(x => x.id === Number(it.product_id));
-      if (!p) continue;
-      const qty = Math.max(1, Number(it.qty || 1));
-      const { rows } = await pool.query(
-        `INSERT INTO orders(group_id, product_id, business_id, qty, customer_name, customer_phone, address, note, delivery, delivery_fee_xaf, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'new') RETURNING *`,
-        [groupId, p.id, bizId, qty, customer_name || null, customer_phone, address || null, note || null, !!delivery, fee]
-      );
-      created.push(rows[0]);
-    }
-    if (!created.length) return res.status(400).json({ error: 'No se pudo crear el pedido' });
-
-    let subTotal = 0;
-    for (const o of created) {
-      const prod = products.find(pp => pp.id === o.product_id);
-      subTotal += Number(prod?.price_xaf || 0) * Number(o.qty || 1);
-    }
-    const total = subTotal + fee;
-    res.json({ group_id: groupId, orders: created, subtotal_xaf: subTotal, delivery_fee_xaf: fee, total_xaf: total, business_id: bizId });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'Error en checkout' }); }
-});
-
-
-// ======================
-// Rutas: BUSINESS (orders)
-// ======================
-app.get('/api/business/orders', requireBusiness, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT o.*, p.title, p.price_xaf FROM orders o
-       JOIN products p ON p.id = o.product_id
-       WHERE o.business_id=$1
-       ORDER BY o.created_at DESC LIMIT 300`, [req.businessId]);
-    res.json({ items: rows, delivery_fee_xaf: DELIVERY_FEE_XAF });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'Error' }); }
-});
-
-app.put('/api/business/orders/:id', requireBusiness, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const { status } = req.body;
-    const allowed = ['new', 'accepted', 'rejected', 'fulfilled'];
-    if (!allowed.includes(status)) return res.status(400).json({ error: 'Estado inválido' });
-    const { rows } = await pool.query(
-      `UPDATE orders SET status=$1 WHERE id=$2 AND business_id=$3 RETURNING *`,
-      [status, id, req.businessId]
-    );
-    if (!rows.length) return res.status(404).json({ error: 'No encontrado' });
-    res.json({ order: rows[0] });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'Error' }); }
-});
-
-
-// ======================
-// 404 JSON para /api
-// ======================
-app.use('/api', (req, res) => {
-  res.status(404).json({ error: 'Ruta no encontrada' });
-});
-
-
-// ======================
-// Manejador global de errores
-// ======================
-app.use((err, req, res, next) => {
-  console.error('❌ Unhandled error:', err);
-  res.status(500).json({ error: 'Error del servidor' });
-});
-
-
-// ======================
-// Iniciar servidor
-// ======================
-migrate()
-  .then(() => app.listen(PORT, () => console.log('🚀 wapmarket backend on :' + PORT)))
-  .catch((e) => { console.error('Migration failed', e); process.exit(1); });
+    tb.appendChild(tr);
+  });
+}
+  // ================== CERRAR SESIÓN ==================
+document.getElementById('logoutBtn').addEventListener('click', ()=>{
+  localStorage.removeItem('bizToken');
+  localStorage.removeItem('bizId');
+  token = null;
+  business_id = null;
+  // Mostrar login otra vez y ocultar el panel
+  document.getElementById('loginBox').style.display = 'block';
+  document.getElementById('panel').style.display = 'none';
+  });
+</script>
+</body>
+</html>
