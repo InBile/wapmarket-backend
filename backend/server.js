@@ -661,6 +661,43 @@ app.put('/api/business/orders/:id', requireBusiness, async (req, res) => {
     res.json({ order: rows[0] });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Error' }); }
 });
+// ======================
+// Rutas: AI / Gemini
+// ======================
+app.post('/api/public/ai/ask', async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: 'No se recibió query' });
+
+    const systemPrompt = "Eres un asistente de compras para WapMarket. Responde de forma amigable y concisa.";
+
+    const response = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-goog-api-key": process.env.GEMINI_KEY
+        },
+        body: JSON.stringify({
+          contents: [
+            { parts: [{ text: systemPrompt }] },
+            { parts: [{ text: query }] }
+          ]
+        })
+      }
+    );
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No recibí respuesta";
+
+    res.json({ text, raw: data });
+  } catch (err) {
+    console.error('❌ Error en AI:', err);
+    res.status(500).json({ error: 'Error interno en el servidor' });
+  }
+});
+
 
 
 // ======================
