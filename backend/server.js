@@ -661,43 +661,50 @@ app.put('/api/business/orders/:id', requireBusiness, async (req, res) => {
     res.json({ order: rows[0] });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Error' }); }
 });
+
 // ======================
 // Rutas: AI / Gemini
 // ======================
+// ✅ PUNTO DE ACCESO SEGURO PARA LA IA
 app.post('/api/public/ai/ask', async (req, res) => {
   try {
     const { query } = req.body;
-    if (!query) return res.status(400).json({ error: 'No se recibió query' });
+    if (!query) {
+      return res.status(400).json({ error: 'No se recibió la consulta (query)' });
+    }
+    if (!process.env.GEMINI_KEY) {
+      return res.status(500).json({ error: 'Falta la clave de API de Gemini en el servidor' });
+    }
 
-    const systemPrompt = "Eres un asistente de compras para WapMarket. Responde de forma amigable y concisa.";
+    // Usamos un modelo más reciente y simplemente pasamos la consulta del frontend
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_KEY}`;
 
-    const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-goog-api-key": process.env.GEMINI_KEY
-        },
-        body: JSON.stringify({
-          contents: [
-            { parts: [{ text: systemPrompt }] },
-            { parts: [{ text: query }] }
-          ]
-        })
-      }
-    );
+    const response = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: query }] }],
+      }),
+    });
 
+    if (!response.ok) {
+      const errorDetails = await response.text();
+      console.error('❌ Error de la API de Gemini:', response.status, errorDetails);
+      return res.status(500).json({ error: `Error de la API de Gemini: ${response.statusText}` });
+    }
+    
     const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "No recibí respuesta";
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No se pudo obtener una respuesta de la IA.';
+    
+    res.json({ text });
 
-    res.json({ text, raw: data });
   } catch (err) {
-    console.error('❌ Error en AI:', err);
-    res.status(500).json({ error: 'Error interno en el servidor' });
+    console.error('❌ Error en el endpoint de IA:', err);
+    res.status(500).json({ error: 'Error interno del servidor al procesar la solicitud de IA' });
   }
 });
-
 
 
 // ======================
